@@ -10,6 +10,7 @@ from torchaudio.transforms import Resample
 from .diffusion import GaussianDiffusion
 from .wavenet import WaveNet
 from ddsp.vocoder import CombSubFast
+from ddsp.vocoder import F0_Extractor, Units_Encoder
 
 class DotDict(dict):
     def __getattr__(*args):         
@@ -235,6 +236,118 @@ class Unit2Wav(nn.Module):
         else:
             ddsp_mel = None
             
+        if not infer:
+            ddsp_loss = F.mse_loss(ddsp_mel, gt_spec)
+            diff_loss = self.diff_model(hidden, gt_spec=gt_spec, k_step=k_step, infer=False)
+            return ddsp_loss, diff_loss
+        else:
+            if gt_spec is not None and ddsp_mel is None:
+                ddsp_mel = gt_spec
+            if k_step > 0:
+                mel = self.diff_model(hidden, gt_spec=ddsp_mel, infer=True, infer_speedup=infer_speedup, method=method, k_step=k_step, use_tqdm=use_tqdm)
+            else:
+                mel = ddsp_mel
+            if return_wav:
+                return vocoder.infer(mel, f0)
+            else:
+                return mel
+
+class Unit2WavDynamic(nn.Module):
+    def __init__(
+        self,
+        sampling_rate,
+        block_size,
+        n_unit,
+        n_spk,
+        use_pitch_aug=False,
+        out_dims=128,
+        n_layers=20,
+        n_chans=384,
+        pcmer_norm=False,
+        **kwargs
+    ):
+        super().__init__()
+        if "f0_extractor" in kwargs:
+            self.f0_extractor = F0_Extractor(
+                kwargs["f0_extractor"],
+                sampling_rate,
+                block_size,
+                kwargs["f0_min"],
+                kwargs["f0_max"]
+            )
+
+        if "encoder" in kwargs:
+            self.units_encoder = Units_Encoder(
+                kwargs["encoder"],
+                kwargs["encoder_ckpt"],
+                kwargs["encoder_sample_rate"],
+                kwargs["encoder_hop_size"],
+                cnhubertsoft_gate=kwargs["cnhubertsoft_gate"]
+            )
+            self.sampling_rate = kwargs["encoder_sample_rate"]
+            self.block_size = kwargs["encoder_hop_size"]
+        self.ddsp_model = CombSubFast(sampling_rate, block_size, n_unit, n_spk, use_pitch_aug, pcmer_norm=pcmer_norm)
+        self.diff_model = GaussianDiffusion(WaveNet(out_dims, n_layers, n_chans, 256), out_dims=out_dims)
+
+    def torch_interpolate_unvoiced(self, f0, uv):
+        """
+        Interpolate unvoiced segments of F0 in PyTorch.
+        """
+        non_uv_indices = torch.nonzero(~uv, as_tuple=False).squeeze(1)
+        unvoiced_indices = torch.nonzero(uv, as_tuple=False).squeeze(1)
+        if len(non_uv_indices) == 0:
+            return f0  # Return as is if no voiced segments
+
+        f0[uv] = torch.interp(unvoiced_indices.float(), non_uv_indices.float(), f0[~uv])
+        return f0
+
+    def forward(
+        self,
+        audio=None,
+        units = None,
+        f0 = None,
+        volume = None,
+        spk_id=None,
+        spk_mix_dict=None,
+        aug_shift=None,
+        vocoder=None,
+        gt_spec=None,
+        infer=True,
+        return_wav=False,
+        infer_speedup=10,
+        method='dpm-solver',
+        k_step=None,
+        use_tqdm=True
+    ):
+
+        '''
+        input:
+            B x n_frames x n_unit
+        return:
+            dict of B x n_frames x feat
+        '''
+        if f0 is None and units is None:
+            with torch.no_grad():
+                # Extract F0
+                f0 = self.f0_extractor.extract(audio, uv_interp=False)
+
+                # Units extraction
+                units = self.units_encoder.encode(audio, self.sampling_rate, self.block_size)
+
+                # Convert f0 to a PyTorch tensor if it's not already
+                f0 = torch.from_numpy(f0).float().to(audio.device)
+
+            # Handle unvoiced segments
+            uv = f0 == 0
+            if torch.any(~uv):
+                f0[uv] = self.torch_interpolate_unvoiced(f0, uv)
+
+        ddsp_wav, hidden, (_, _) = self.ddsp_model(units, f0, volume, spk_id=spk_id, spk_mix_dict=spk_mix_dict, aug_shift=aug_shift, infer=infer)
+        if vocoder is not None:
+            ddsp_mel = vocoder.extract(ddsp_wav)
+        else:
+            ddsp_mel = None
+
         if not infer:
             ddsp_loss = F.mse_loss(ddsp_mel, gt_spec)
             diff_loss = self.diff_model(hidden, gt_spec=gt_spec, k_step=k_step, infer=False)

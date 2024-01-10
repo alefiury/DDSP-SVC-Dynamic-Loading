@@ -15,13 +15,14 @@ data:
   valid_path: data/val # Create a folder named "audio" under this path and put the audio clip in it
   extensions: # List of extension included in the data collection
     - wav
+    - flac
 model:
   type: 'DiffusionNew'
   n_layers: 20
   n_chans: 512
   k_step_max: 100
   use_pitch_aug: true 
-  n_spk: 1 # max number of different speakers
+  n_spk: 6 # max number of different speakers
 device: cuda # training device
 vocoder:
   type: 'nsf-hifigan'
