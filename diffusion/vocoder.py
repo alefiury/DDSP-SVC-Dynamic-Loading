@@ -11,6 +11,7 @@ from .diffusion import GaussianDiffusion
 from .wavenet import WaveNet
 from ddsp.vocoder import CombSubFast
 from ddsp.vocoder import F0_Extractor, Units_Encoder
+from logger import utils
 
 class DotDict(dict):
     def __getattr__(*args):         
@@ -220,8 +221,24 @@ class Unit2Wav(nn.Module):
         super().__init__()
         self.ddsp_model = CombSubFast(sampling_rate, block_size, n_unit, n_spk, use_pitch_aug, pcmer_norm=pcmer_norm)
         self.diff_model = GaussianDiffusion(WaveNet(out_dims, n_layers, n_chans, 256), out_dims=out_dims)
+        args = utils.load_config("configs/diffusion-new.yaml")
+        # initialize units encoder
+        if args.data.encoder == 'cnhubertsoftfish':
+            cnhubertsoft_gate = args.data.cnhubertsoft_gate
+        else:
+            cnhubertsoft_gate = 10
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.units_encoder = Units_Encoder(
+                            args.data.encoder, 
+                            args.data.encoder_ckpt, 
+                            args.data.encoder_sample_rate, 
+                            args.data.encoder_hop_size,
+                            cnhubertsoft_gate=cnhubertsoft_gate,
+                            device = device)  
+        self.sample_rate = args.data.sampling_rate
+        self.hop_size = args.data.block_size
 
-    def forward(self, units, f0, volume, spk_id=None, spk_mix_dict=None, aug_shift=None, vocoder=None,
+    def forward(self, f0, volume, audio, spk_id=None, spk_mix_dict=None, aug_shift=None, vocoder=None,
                 gt_spec=None, infer=True, return_wav=False, infer_speedup=10, method='dpm-solver', k_step=None, use_tqdm=True):
         
         '''
@@ -230,6 +247,8 @@ class Unit2Wav(nn.Module):
         return: 
             dict of B x n_frames x feat
         '''
+        units_t = self.units_encoder.encode(audio, self.sample_rate, self.hop_size)
+        units = units_t.squeeze().to('cpu').numpy()
         ddsp_wav, hidden, (_, _) = self.ddsp_model(units, f0, volume, spk_id=spk_id, spk_mix_dict=spk_mix_dict, aug_shift=aug_shift, infer=infer)
         if vocoder is not None:
             ddsp_mel = vocoder.extract(ddsp_wav)

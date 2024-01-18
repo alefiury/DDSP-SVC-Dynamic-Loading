@@ -14,18 +14,18 @@ def parse_args(args=None, namespace=None):
         "-c",
         "--config",
         type=str,
-        required=True,
+        required=False,
         help="path to the config file")
     return parser.parse_args(args=args, namespace=namespace)
 
 
 if __name__ == '__main__':
     # parse commands
-    cmd = parse_args()
+    cmd_config = "configs/diffusion-new.yaml"
     
     # load config
-    args = utils.load_config(cmd.config)
-    print(' > config:', cmd.config)
+    args = utils.load_config(cmd_config)
+    print(' > config:', cmd_config)
     print(' >    exp:', args.env.expdir)
     
     # load vocoder

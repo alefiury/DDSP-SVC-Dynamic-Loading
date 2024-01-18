@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from torch.utils.data import DataLoader
+import numpy as np
 
 from logger import utils
 from diffusion.vocoder import Vocoder
@@ -8,7 +11,7 @@ from diffusion.data_loaders import ModifiedAudioDataset
 
 def main():
     config_path = "configs/diffusion-new.yaml"
-    base_dir = "/home/alefiury/Downloads/audios_test"
+    base_dir = "data/audio"
     device = "cpu"
 
     args = utils.load_config(config_path)
@@ -53,8 +56,16 @@ def main():
     )
 
     for data in data_loader:
-        print(data)
-        break
+        audio_path = Path(base_dir) / data["name_ext"][0]
+        aug_mel = np.load(str(audio_path).replace("audio", "aug_mel") + ".npy")
+        aug_vol = np.load(str(audio_path).replace("audio", "aug_vol") + ".npy")
+        f0 = np.load(str(audio_path).replace("audio", "f0") + ".npy")
+        mel = np.load(str(audio_path).replace("audio", "mel") + ".npy")
+        units = np.load(str(audio_path).replace("audio", "units") + ".npy")
+        vol = np.load(str(audio_path).replace("audio", "volume") + ".npy")
+        print("f0 ", data["f0"].shape, f0.shape)
+        print("mel ", data["mel"].shape, aug_mel.shape)
+        print("volume ", data["volume"].shape, aug_vol.shape)
 
 if __name__ == '__main__':
     main()

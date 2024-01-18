@@ -8,6 +8,8 @@ import torchaudio
 import random
 from tqdm import tqdm
 from torch.utils.data import Dataset
+from ddsp.vocoder import F0_Extractor, Volume_Extractor
+from diffusion.vocoder import Vocoder
 
 def traverse_dir(
         root_dir,
@@ -52,8 +54,25 @@ def traverse_dir(
 
 
 def get_data_loaders(args, whole_audio=False):
-    data_train = AudioDataset(
+    # initialize f0 extractor
+    f0_extractor = F0_Extractor(
+                        args.data.f0_extractor, 
+                        args.data.sampling_rate, 
+                        args.data.block_size, 
+                        args.data.f0_min, 
+                        args.data.f0_max)
+    
+    # initialize volume extractor
+    volume_extractor = Volume_Extractor(args.data.block_size)
+    
+    # initialize mel extractor
+    mel_extractor = Vocoder(args.vocoder.type, args.vocoder.ckpt, device = "cpu")
+
+    data_train = ModifiedAudioDataset(
         args.data.train_path,
+        f0_extractor=f0_extractor,
+        volume_extractor=volume_extractor,
+        mel_extractor=mel_extractor,
         waveform_sec=args.data.duration,
         hop_size=args.data.block_size,
         sample_rate=args.data.sampling_rate,
@@ -65,15 +84,19 @@ def get_data_loaders(args, whole_audio=False):
         fp16=args.train.cache_fp16,
         use_aug=True)
     loader_train = torch.utils.data.DataLoader(
-        data_train ,
+        data_train,
         batch_size=args.train.batch_size if not whole_audio else 1,
         shuffle=True,
         num_workers=args.train.num_workers if args.train.cache_device=='cpu' else 0,
         persistent_workers=(args.train.num_workers > 0) if args.train.cache_device=='cpu' else False,
         pin_memory=True if args.train.cache_device=='cpu' else False
     )
-    data_valid = AudioDataset(
+    
+    data_valid = ModifiedAudioDataset(
         args.data.valid_path,
+        f0_extractor=f0_extractor,
+        volume_extractor=volume_extractor,
+        mel_extractor=mel_extractor,
         waveform_sec=args.data.duration,
         hop_size=args.data.block_size,
         sample_rate=args.data.sampling_rate,
@@ -286,6 +309,9 @@ class ModifiedAudioDataset(Dataset):
         waveform_sec,
         hop_size,
         sample_rate,
+        mel_extractor,
+        f0_extractor,
+        volume_extractor,
         load_all_data=True,
         whole_audio=False,
         extensions=['wav'],
@@ -293,9 +319,6 @@ class ModifiedAudioDataset(Dataset):
         device='cpu',
         fp16=False,
         use_aug=False,
-        mel_extractor=None,
-        f0_extractor=None,
-        volume_extractor=None,
         use_pitch_aug=False,
     ):
         super().__init__()
@@ -432,7 +455,8 @@ class ModifiedAudioDataset(Dataset):
         # load shift
         aug_shift = torch.from_numpy(np.array([[aug_shift]])).float()
 
-        return dict(mel=mel, f0=f0_frames, volume=volume_frames, spk_id=spk_id, aug_shift=aug_shift, name=name, name_ext=name_ext)
+        return dict(mel=mel, f0=f0_frames, volume=volume_frames, spk_id=spk_id, aug_shift=aug_shift, name=name, name_ext=name_ext,
+                    audio=audio)
 
     def __len__(self):
         return len(self.paths)

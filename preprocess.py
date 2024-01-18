@@ -21,7 +21,7 @@ def parse_args(args=None, namespace=None):
         "-c",
         "--config",
         type=str,
-        required=True,
+        required=False,
         help="path to the config file")
     parser.add_argument(
         "-d",
@@ -149,7 +149,7 @@ if __name__ == '__main__':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
     # load config
-    args = utils.load_config(cmd.config)
+    args = utils.load_config("configs/diffusion-new.yaml")
     sample_rate = args.data.sampling_rate
     hop_size = args.data.block_size
     
