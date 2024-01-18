@@ -419,7 +419,7 @@ class ModifiedAudioDataset(Dataset):
         volume = self.volume_extractor.extract(audio_numpy)
 
         # Load mel
-        mel = self.mel_extractor.extract(audio, self.sample_rate)
+        mel = self.mel_extractor.extract(audio, self.sample_rate).squeeze().to("cpu")
         max_amp = float(torch.max(torch.abs(audio))) + 1e-5
         max_shift = min(1, np.log10(1/max_amp))
         log10_vol_shift = random.uniform(-1, max_shift)
@@ -429,7 +429,7 @@ class ModifiedAudioDataset(Dataset):
             keyshift = 0
 
         aug_mel_t = self.mel_extractor.extract(audio * (10 ** log10_vol_shift), self.sample_rate, keyshift = keyshift)
-        aug_mel = aug_mel_t.squeeze().to('cpu').numpy()
+        aug_mel = aug_mel_t.squeeze().to('cpu')
         aug_vol = self.volume_extractor.extract(audio_numpy * (10 ** log10_vol_shift))
 
         volume_frames = aug_vol if aug_flag else volume
