@@ -133,7 +133,7 @@ class F0_Extractor:
             f0 = np.pad(f0, (start_frame, 0))
             
         else:
-            raise ValueError(f" [x] Unknown f0 extractor: {f0_extractor}")
+            raise ValueError(f" [x] Unknown f0 extractor: {self.f0_extractor}")
                     
         # interpolate the unvoiced f0 
         if uv_interp:
@@ -141,7 +141,7 @@ class F0_Extractor:
             if len(f0[~uv]) > 0:
                 f0[uv] = np.interp(np.where(uv)[0], np.where(~uv)[0], f0[~uv])
             f0[f0 < self.f0_min] = self.f0_min
-        return f0
+        return f0.astype('float32')
 
 
 class Volume_Extractor:
@@ -324,7 +324,7 @@ class Audio2ContentVec768L12():
             logits = self.hubert.extract_features(**inputs)
             feats = logits[0]
         units = feats  # .transpose(2, 1)
-        return units    
+        return units
 
 
 class CNHubertSoftFish(torch.nn.Module):

@@ -54,6 +54,7 @@ if __name__ == '__main__':
                 vocoder.dimension,
                 args.model.n_layers,
                 args.model.n_chans,
+                args.device,
                 pcmer_norm=args.model.pcmer_norm)
         print(' > pcmer_norm:', args.model.pcmer_norm)
                 

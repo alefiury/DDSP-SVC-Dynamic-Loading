@@ -126,11 +126,11 @@ def train(args, initial_global_step, model, optimizer, scheduler, vocoder, loade
             
             # forward
             if dtype == torch.float32:
-                ddsp_loss, diff_loss = model(data['units'].float(), data['f0'], data['volume'], data['spk_id'], 
+                ddsp_loss, diff_loss = model(data['f0'].unsqueeze(2), data['volume'].unsqueeze(2), data['audio'], data['spk_id'], 
                                 aug_shift=data['aug_shift'], vocoder=vocoder, gt_spec=data['mel'].float(), infer=False, k_step=args.model.k_step_max)
             else:
                 with autocast(device_type=args.device, dtype=dtype):
-                    ddsp_loss, diff_loss=model(data['units'], data['f0'], data['volume'], data['spk_id'], 
+                    ddsp_loss, diff_loss=model(data['f0'].unsqueeze(2), data['volume'].unsqueeze(2), data['audio'], data['spk_id'], 
                                     aug_shift=data['aug_shift'], vocoder=vocoder, gt_spec=data['mel'].float(), infer=False, k_step=args.model.k_step_max)
             
             # handle nan loss

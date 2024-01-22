@@ -11,7 +11,7 @@ data:
   encoder_hop_size: 320
   encoder_out_channels: 768 # 256 if using 'hubertsoft'
   encoder_ckpt: pretrain/contentvec/checkpoint_best_legacy_500.pt
-  train_path: data/train # Create a folder named "audio" under this path and put the audio clip in it
+  train_path: data # Create a folder named "audio" under this path and put the audio clip in it
   valid_path: data/val # Create a folder named "audio" under this path and put the audio clip in it
   extensions: # List of extension included in the data collection
     - wav
@@ -23,7 +23,7 @@ model:
   k_step_max: 100
   use_pitch_aug: true
   n_spk: 4 # max number of different speakers
-device: cuda # training device
+device: cpu # training device
 vocoder:
   type: 'nsf-hifigan'
   ckpt: 'pretrain/nsf_hifigan/model'

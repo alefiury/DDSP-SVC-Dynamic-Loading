@@ -83,7 +83,7 @@ class Unit2Control(nn.Module):
                     spk_id_torch = torch.LongTensor(np.array([[k]])).to(units.device)
                     x = x + v * self.spk_embed(spk_id_torch - 1)
             else:
-                x = x + self.spk_embed(spk_id - 1)
+                x = x + self.spk_embed(spk_id)
         if self.aug_shift_embed is not None and aug_shift is not None:
             x = x + self.aug_shift_embed(aug_shift / 5)
         x = self.decoder(x)
