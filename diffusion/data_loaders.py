@@ -68,6 +68,8 @@ def get_data_loaders(args, whole_audio=False):
     # initialize mel extractor
     mel_extractor = Vocoder(args.vocoder.type, args.vocoder.ckpt, device = "cpu")
 
+    collate_fn = ModifiedAudioDatasetCollate()
+
     data_train = ModifiedAudioDataset(
         args.data.train_path,
         f0_extractor=f0_extractor,
@@ -89,7 +91,8 @@ def get_data_loaders(args, whole_audio=False):
         shuffle=True,
         num_workers=args.train.num_workers if args.train.cache_device=='cpu' else 0,
         persistent_workers=(args.train.num_workers > 0) if args.train.cache_device=='cpu' else False,
-        pin_memory=True if args.train.cache_device=='cpu' else False
+        pin_memory=True if args.train.cache_device=='cpu' else False,
+        collate_fn=collate_fn
     )
     
     data_valid = ModifiedAudioDataset(
@@ -109,7 +112,8 @@ def get_data_loaders(args, whole_audio=False):
         batch_size=1,
         shuffle=False,
         num_workers=0,
-        pin_memory=True
+        pin_memory=True,
+        collate_fn=collate_fn
     )
     return loader_train, loader_valid 
 
@@ -407,11 +411,8 @@ class ModifiedAudioDataset(Dataset):
         if sr < self.sample_rate:
             raise ValueError("Sample rate of audio is lower than the target sample rate")
 
-        start = int(idx_from * self.sample_rate)
-        end = int((idx_from + waveform_sec) * self.sample_rate)
-
-        # Trim audio
-        audio = audio[:, start:end]
+        # start = int(idx_from * self.sample_rate)
+        # end = int((idx_from + waveform_sec) * self.sample_rate)
 
         audio_numpy = audio.squeeze().to("cpu").numpy()
 
@@ -455,8 +456,47 @@ class ModifiedAudioDataset(Dataset):
         # load shift
         aug_shift = torch.from_numpy(np.array([[aug_shift]])).float()
 
-        return dict(mel=mel, f0=f0_frames, volume=volume_frames, spk_id=spk_id, aug_shift=aug_shift, name=name, name_ext=name_ext,
+
+        frame_resolution = self.hop_size / self.sample_rate
+        start_frame = int(idx_from / frame_resolution)
+        units_frame_len = int(waveform_sec / frame_resolution)
+
+        return dict(mel=mel[start_frame:start_frame+units_frame_len], 
+                    f0=f0_frames[start_frame:start_frame+units_frame_len], 
+                    volume=volume_frames[start_frame:start_frame+units_frame_len], 
+                    spk_id=spk_id, aug_shift=aug_shift,
+                    start_frame=torch.tensor([start_frame]), 
+                    units_frame_len=torch.tensor([units_frame_len]),
                     audio=audio)
 
     def __len__(self):
         return len(self.paths)
+    
+class ModifiedAudioDatasetCollate:
+
+    def __call__(self, batch):
+        batch = [b for b in batch if b is not None]
+
+        mel = torch.concat([x['mel'].unsqueeze(0) for x in batch])
+        f0 = torch.concat([torch.from_numpy(x['f0']).unsqueeze(0) for x in batch])
+        volume = torch.concat([torch.from_numpy(x['volume']).unsqueeze(0) for x in batch])
+        spk_id = torch.concat([x['spk_id'].unsqueeze(0) for x in batch])
+        aug_shift = torch.concat([x['aug_shift'].unsqueeze(0) for x in batch])
+        start_frame = torch.concat([x['start_frame'].unsqueeze(0) for x in batch])
+        units_frame_len = torch.concat([x['units_frame_len'].unsqueeze(0) for x in batch])
+        max_audio_len = max([x['audio'].size(1) for x in batch])
+
+
+        audio_padded = torch.FloatTensor(len(batch), 1, max_audio_len)
+
+        audio_padded.zero_()
+
+        for i in range(len(batch)):
+            row = batch[i]
+            audio = row['audio']
+            audio_padded[i, :, :audio.size(1)] = audio
+
+        return dict(
+            mel=mel, f0=f0, volume=volume, spk_id=spk_id, aug_shift=aug_shift,
+            start_frame=start_frame, units_frame_len=units_frame_len, audio=audio_padded
+        )

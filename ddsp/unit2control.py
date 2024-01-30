@@ -3,7 +3,7 @@
 import numpy as np
 import torch
 import torch.nn as nn
-from torch.nn.utils import weight_norm
+from torch.nn.utils.parametrizations import weight_norm
 
 from .pcmer import PCmer
 

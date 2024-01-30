@@ -238,7 +238,7 @@ class Unit2Wav(nn.Module):
         self.sample_rate = args.data.sampling_rate
         self.hop_size = args.data.block_size
 
-    def forward(self, f0, volume, audio, spk_id=None, spk_mix_dict=None, aug_shift=None, vocoder=None,
+    def forward(self, f0, volume, audio, start_frame, units_frame_len, spk_id=None, spk_mix_dict=None, aug_shift=None, vocoder=None,
                 gt_spec=None, infer=True, return_wav=False, infer_speedup=10, method='dpm-solver', k_step=None, use_tqdm=True):
         
         '''
@@ -250,14 +250,15 @@ class Unit2Wav(nn.Module):
         results = []
         for i in range(audio.shape[0]):
             units_t = self.units_encoder.encode(audio[i], self.sample_rate, self.hop_size)
-            results.append(units_t)
-        units_batch = torch.concat(results) 
-        ddsp_wav, hidden, (_, _) = self.ddsp_model(units_batch, f0, volume, spk_id=spk_id, spk_mix_dict=spk_mix_dict, aug_shift=aug_shift, infer=infer)
+            results.append(units_t[:, start_frame[i]:start_frame[i]+units_frame_len[i], :])
+        units_batch = torch.concat(results)
+        ddsp_wav, hidden, (_, _) = self.ddsp_model(units_batch, 
+                                                   f0, volume, spk_id=spk_id, spk_mix_dict=spk_mix_dict, aug_shift=aug_shift, infer=infer)
         if vocoder is not None:
             ddsp_mel = vocoder.extract(ddsp_wav)
         else:
             ddsp_mel = None
-            
+
         if not infer:
             ddsp_loss = F.mse_loss(ddsp_mel, gt_spec)
             diff_loss = self.diff_model(hidden, gt_spec=gt_spec, k_step=k_step, infer=False)
