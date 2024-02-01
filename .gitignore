@@ -6,3 +6,4 @@ results/
 cache/
 pretrain/
 metadata/
+speaker_dict.json
