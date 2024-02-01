@@ -1,6 +1,9 @@
 import os
 import random
 import re
+from typing import Dict
+import json
+
 import numpy as np
 import librosa
 import torch
@@ -52,23 +55,70 @@ def traverse_dir(
         file_list.sort()
     return file_list
 
+def build_speaker_dict(metadata_path: str) -> Dict[str, int]:
+    speaker_dict = {}
+    with open(metadata_path, "r") as f:
+        paths = f.read().splitlines()
+
+    for name_ext in tqdm(paths, total=len(paths), desc="Building speaker dictionary"):
+        speaker_name = os.path.basename(os.path.dirname(name_ext))
+        if speaker_name not in speaker_dict:
+            # if is the first speaker, then set spk_id to 0
+            if len(speaker_dict) == 0:
+                spk_id = 0
+            else:
+                spk_id = len(speaker_dict)
+
+            speaker_dict[speaker_name] = spk_id
+
+    assert len(speaker_dict) > 0, "No speakers found in the dataset"
+
+    return speaker_dict
+
+
+def save_speaker_dict(speaker_dict: Dict[str, int], save_path: str) -> None:
+    """
+    Save the speaker dictionary to a json file
+
+    Args:
+
+    speaker_dict (Dict[str, int]): The speaker dictionary
+    save_path (str): The path to save the speaker dictionary
+
+    Returns:
+
+    None
+    """
+    with open(save_path, "w") as f:
+        json.dump(speaker_dict, f)
+
+    print(f"Speaker dictionary saved to {save_path}")
+
 
 def get_data_loaders(args, whole_audio=False):
     # initialize f0 extractor
     f0_extractor = F0_Extractor(
-                        args.data.f0_extractor, 
-                        args.data.sampling_rate, 
-                        args.data.block_size, 
-                        args.data.f0_min, 
-                        args.data.f0_max)
-    
+        args.data.f0_extractor,
+        args.data.sampling_rate,
+        args.data.block_size,
+        args.data.f0_min,
+        args.data.f0_max
+    )
+
+
     # initialize volume extractor
     volume_extractor = Volume_Extractor(args.data.block_size)
-    
+
     # initialize mel extractor
     mel_extractor = Vocoder(args.vocoder.type, args.vocoder.ckpt, device = "cpu")
 
     collate_fn = ModifiedAudioDatasetCollate()
+
+    speaker_dict = build_speaker_dict(args.data.train_path)
+
+    save_speaker_dict(speaker_dict, "configs/speaker_dict.json")
+
+    assert len(speaker_dict) == args.model.n_spk, f"n_spk: {args.model.n_spk} is not equal to the number of speakers in the dataset: {speaker_dict}"
 
     data_train = ModifiedAudioDataset(
         args.data.train_path,
@@ -84,7 +134,10 @@ def get_data_loaders(args, whole_audio=False):
         n_spk=args.model.n_spk,
         device=args.train.cache_device,
         fp16=args.train.cache_fp16,
-        use_aug=True)
+        use_aug=True,
+        speaker_dict=speaker_dict
+    )
+
     loader_train = torch.utils.data.DataLoader(
         data_train,
         batch_size=args.train.batch_size if not whole_audio else 1,
@@ -94,7 +147,7 @@ def get_data_loaders(args, whole_audio=False):
         pin_memory=True if args.train.cache_device=='cpu' else False,
         collate_fn=collate_fn
     )
-    
+
     data_valid = ModifiedAudioDataset(
         args.data.valid_path,
         f0_extractor=f0_extractor,
@@ -106,7 +159,9 @@ def get_data_loaders(args, whole_audio=False):
         load_all_data=args.train.cache_all_data,
         whole_audio=True,
         extensions=args.data.extensions,
-        n_spk=args.model.n_spk)
+        n_spk=args.model.n_spk,
+        speaker_dict=speaker_dict,
+    )
     loader_valid = torch.utils.data.DataLoader(
         data_valid,
         batch_size=1,
@@ -115,7 +170,7 @@ def get_data_loaders(args, whole_audio=False):
         pin_memory=True,
         collate_fn=collate_fn
     )
-    return loader_train, loader_valid 
+    return loader_train, loader_valid
 
 
 class AudioDataset(Dataset):
@@ -306,10 +361,11 @@ class AudioDataset(Dataset):
     def __len__(self):
         return len(self.paths)
 
+
 class ModifiedAudioDataset(Dataset):
     def __init__(
         self,
-        path_root,
+        data_metadata_path,
         waveform_sec,
         hop_size,
         sample_rate,
@@ -324,62 +380,42 @@ class ModifiedAudioDataset(Dataset):
         fp16=False,
         use_aug=False,
         use_pitch_aug=False,
+        speaker_dict: dict = None
     ):
         super().__init__()
 
         self.waveform_sec = waveform_sec
         self.sample_rate = sample_rate
         self.hop_size = hop_size
-        self.path_root = path_root
+        # self.path_root = path_root
         self.mel_extractor = mel_extractor
         self.f0_extractor = f0_extractor
         self.volume_extractor = volume_extractor
-        self.paths = traverse_dir(
-            path_root,
-            extensions=extensions,
-            is_pure=True,
-            is_sort=True,
-            is_ext=True
-        )
+        with open(data_metadata_path,"r") as f:
+            self.paths = f.read().splitlines()
 
         self.whole_audio = whole_audio
         self.use_aug = use_aug
         self.data_buffer = {}
         self.use_pitch_aug = use_pitch_aug
 
-        self.speaker_dict = {}
+        self.speaker_dict = speaker_dict
 
         for name_ext in tqdm(self.paths, total=len(self.paths)):
-            path_audio = os.path.join(self.path_root, name_ext)
+            path_audio = name_ext
             duration = librosa.get_duration(filename = path_audio, sr = self.sample_rate)
 
             speaker_name = os.path.basename(os.path.dirname(path_audio))
-            if speaker_name not in self.speaker_dict:
-                # if is the first speaker, then set spk_id to 0
-                if len(self.speaker_dict) == 0:
-                    spk_id = torch.LongTensor(np.array([0])).to(device)
-                else:
-                    spk_id = torch.LongTensor(np.array([len(self.speaker_dict)])).to(device)
 
-                self.speaker_dict[speaker_name] = spk_id
+            spk_id = self.speaker_dict[speaker_name]
 
-            else:
-                spk_id = self.speaker_dict[speaker_name]
+            # convert to torch tensor
+            spk_id = torch.LongTensor(np.array([spk_id])).to(device)
 
             self.data_buffer[name_ext] = {
                 "spk_id": spk_id,
                 "duration": duration
             }
-
-        assert len(self.speaker_dict) == n_spk, "n_spk is not equal to the number of speakers in the dataset"
-
-        # print uniques spk_ids
-        self.spk_ids = []
-        for name_ext in self.data_buffer.keys():
-            self.spk_ids.append(self.data_buffer[name_ext]["spk_id"].squeeze(0).item())
-        self.spk_ids = list(set(self.spk_ids))
-        print(" > spk_ids:", self.spk_ids)
-
 
     def __getitem__(self, file_idx):
         name_ext = self.paths[file_idx]
@@ -389,7 +425,7 @@ class ModifiedAudioDataset(Dataset):
             return self.__getitem__( (file_idx + 1) % len(self.paths))
 
         # get item
-        return self.get_data(name_ext, data_buffer, os.path.join(self.path_root, name_ext))
+        return self.get_data(name_ext, data_buffer, name_ext)
 
     def get_data(self, name_ext, data_buffer, filepath):
         name = os.path.splitext(name_ext)[0]

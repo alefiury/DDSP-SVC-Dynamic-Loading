@@ -4,5 +4,5 @@ data/*
 venv/
 results/
 cache/
-contentvec/
-rmvpe/
+pretrain/
+metadata/
