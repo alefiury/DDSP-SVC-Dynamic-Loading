@@ -4,5 +4,6 @@ data/*
 venv/
 results/
 cache/
-contentvec/
-rmvpe/
+pretrain/
+metadata/
+speaker_dict.json
